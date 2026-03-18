@@ -21,8 +21,8 @@ proxy_store: dict = {
     "updating": False,
 }
 
-# Интервал обновления — 30 минут
-UPDATE_INTERVAL = 1800
+# Интервал обновления — 10 минут
+UPDATE_INTERVAL = 600
 
 
 async def update_proxies():

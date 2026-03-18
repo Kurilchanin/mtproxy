@@ -202,11 +202,8 @@
     <select id="filterCountry" onchange="applyFilters()">
       <option value="">Все страны</option>
     </select>
-    <select id="filterType" onchange="applyFilters()">
-      <option value="">Все типы</option>
-      <option value="faketls">FakeTLS (ee)</option>
-      <option value="dd">dd</option>
-      <option value="plain">plain</option>
+    <select id="filterType" onchange="applyFilters()" style="display:none;">
+      <option value="faketls">FakeTLS</option>
     </select>
     <input type="text" id="searchHost" placeholder="Поиск по хосту..." oninput="applyFilters()">
   </div>
@@ -218,7 +215,6 @@
         <th onclick="sortBy('host')">Host</th>
         <th onclick="sortBy('port')">Port</th>
         <th onclick="sortBy('country')">Страна</th>
-        <th onclick="sortBy('proxy_type')">Тип</th>
         <th onclick="sortBy('latency_ms')">Ping</th>
         <th>Подключить</th>
       </tr>
@@ -322,13 +318,12 @@ function doSort() {
 function renderTable() {
   const tbody = document.getElementById('proxyTable');
   if (displayProxies.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" class="empty">Прокси загружаются... Первая проверка занимает ~2 минуты.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" class="empty">Прокси загружаются... Первая проверка занимает ~2 минуты.</td></tr>';
     return;
   }
 
   tbody.innerHTML = displayProxies.map((p, i) => {
     const flag = countryToFlag(p.country);
-    const typeClass = p.proxy_type || '';
     const ping = p.latency_ms >= 0 ? p.latency_ms + 'ms' : '-';
     const pingClass = p.latency_ms >= 0 ? (p.latency_ms < 500 ? 'fast' : p.latency_ms < 2000 ? 'medium' : 'slow') : '';
     const tgLink = `tg://proxy?server=${p.host}&port=${p.port}&secret=${p.secret}`;
@@ -339,7 +334,6 @@ function renderTable() {
       <td>${p.host}</td>
       <td>${p.port}</td>
       <td>${flag} ${p.country || '??'}</td>
-      <td><span class="badge ${typeClass}">${p.proxy_type}</span></td>
       <td class="ping ${pingClass}">${ping}</td>
       <td><a href="${tgLink}" class="tg-link">TG</a> · <a href="${webLink}" class="tg-link" target="_blank">Web</a></td>
     </tr>`;

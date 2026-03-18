@@ -1,0 +1,14 @@
+[Unit]
+Description=MTProto Proxy Checker
+After=network.target
+
+[Service]
+Type=simple
+User=subuntu
+WorkingDirectory=/home/subuntu/mtproxy
+ExecStart=/home/subuntu/mtproxy/venv/bin/python app.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

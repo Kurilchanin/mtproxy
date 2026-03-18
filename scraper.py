@@ -231,9 +231,11 @@ async def quick_filter(proxy: dict, sem: asyncio.Semaphore) -> bool:
 # ===================== Fetch =====================
 
 async def fetch_proxies() -> list[dict]:
-    async with aiohttp.ClientSession() as session:
+    timeout = aiohttp.ClientTimeout(total=60)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.get(API_URL, headers=HEADERS) as resp:
             if resp.status != 200:
+                print(f"[scraper] API вернул {resp.status}")
                 return []
             data = await resp.json()
             return data if isinstance(data, list) else []

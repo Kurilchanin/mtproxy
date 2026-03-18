@@ -7,6 +7,7 @@ Type=simple
 User=subuntu
 WorkingDirectory=/home/subuntu/mtproxy
 EnvironmentFile=/home/subuntu/mtproxy/.env
+Environment=PYTHONUNBUFFERED=1
 ExecStart=/home/subuntu/mtproxy/venv/bin/python app.py
 Restart=always
 RestartSec=5

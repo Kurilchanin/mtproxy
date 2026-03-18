@@ -232,6 +232,30 @@ async def quick_filter(proxy: dict, sem: asyncio.Semaphore) -> bool:
 
 async def fetch_proxies() -> list[dict]:
     import json
+
+    # Пробуем через CF Worker (обход блокировки mtpro.xyz из РФ)
+    cf_url = os.environ.get("CF_WORKER_URL", "")
+    cf_token = os.environ.get("CF_API_TOKEN", "")
+
+    if cf_url and cf_token:
+        try:
+            timeout = aiohttp.ClientTimeout(total=30)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(
+                    f"{cf_url}/api/fetch-proxies",
+                    headers={"Authorization": f"Bearer {cf_token}"},
+                ) as resp:
+                    if resp.status == 200:
+                        text = await resp.text()
+                        data = json.loads(text)
+                        if isinstance(data, list) and data:
+                            print(f"[scraper] Получено через CF Worker")
+                            return data
+                    print(f"[scraper] CF Worker вернул {resp.status}, пробую напрямую...")
+        except Exception as e:
+            print(f"[scraper] CF Worker недоступен ({e}), пробую напрямую...")
+
+    # Фоллбэк: прямой запрос
     timeout = aiohttp.ClientTimeout(total=120, sock_read=90)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.get(API_URL, headers=HEADERS) as resp:

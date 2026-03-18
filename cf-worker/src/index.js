@@ -1,20 +1,25 @@
 /**
  * MTProxy API — Cloudflare Worker
  *
- * KV key "proxies" → JSON array of working FakeTLS proxies (ping 50-500ms)
- *
  * Endpoints:
- *   POST /api/proxies  — принимает список от сервера (с auth токеном)
- *   GET  /api/proxies   — отдаёт топ-10 по пингу (для gecko-vpn-app)
- *   GET  /api/proxies?limit=N — отдаёт топ-N
+ *   GET  /api/fetch-proxies — проксирует запрос к mtpro.xyz (обход блокировки)
+ *   POST /api/proxies       — принимает проверенные прокси от сервера (с auth)
+ *   GET  /api/proxies       — отдаёт топ-10 по пингу (для gecko-vpn-app)
  */
+
+const MTPRO_API = 'https://mtpro.xyz/api/?type=mtprotoS';
+const MTPRO_HEADERS = {
+	'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+	'Referer': 'https://mtpro.xyz/mtproto',
+	'Accept': 'application/json, text/plain, */*',
+	'Origin': 'https://mtpro.xyz',
+};
 
 export default {
 	async fetch(request, env) {
 		const url = new URL(request.url);
 		const path = url.pathname;
 
-		// CORS headers
 		const corsHeaders = {
 			'Access-Control-Allow-Origin': '*',
 			'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
@@ -23,6 +28,10 @@ export default {
 
 		if (request.method === 'OPTIONS') {
 			return new Response(null, { headers: corsHeaders });
+		}
+
+		if (path === '/api/fetch-proxies' && request.method === 'GET') {
+			return handleFetchProxies(request, env, corsHeaders);
 		}
 
 		if (path === '/api/proxies') {
@@ -38,8 +47,27 @@ export default {
 	},
 };
 
+async function handleFetchProxies(request, env, corsHeaders) {
+	// Auth check
+	const auth = request.headers.get('Authorization');
+	if (!auth || auth !== `Bearer ${env.API_TOKEN}`) {
+		return new Response(JSON.stringify({ error: 'unauthorized' }), {
+			status: 401,
+			headers: { 'Content-Type': 'application/json', ...corsHeaders },
+		});
+	}
+
+	// Проксируем запрос к mtpro.xyz через CF (нероссийский IP)
+	const resp = await fetch(MTPRO_API, { headers: MTPRO_HEADERS });
+	const data = await resp.text();
+
+	return new Response(data, {
+		status: resp.status,
+		headers: { 'Content-Type': 'application/json', ...corsHeaders },
+	});
+}
+
 async function handlePost(request, env, corsHeaders) {
-	// Проверяем auth токен
 	const auth = request.headers.get('Authorization');
 	if (!auth || auth !== `Bearer ${env.API_TOKEN}`) {
 		return new Response(JSON.stringify({ error: 'unauthorized' }), {
@@ -58,7 +86,6 @@ async function handlePost(request, env, corsHeaders) {
 		});
 	}
 
-	// Сохраняем в KV с TTL 15 минут (на случай если сервер перестанет обновлять)
 	await env.PROXIES.put('proxies', JSON.stringify(proxies), { expirationTtl: 900 });
 	await env.PROXIES.put('updated_at', new Date().toISOString(), { expirationTtl: 900 });
 
@@ -78,7 +105,6 @@ async function handleGet(url, env, corsHeaders) {
 	}
 
 	const all = JSON.parse(raw);
-	// Уже отсортированы по пингу, берём первые N
 	const proxies = all.slice(0, limit);
 	const updatedAt = await env.PROXIES.get('updated_at');
 

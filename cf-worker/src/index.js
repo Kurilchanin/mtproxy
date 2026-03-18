@@ -59,10 +59,20 @@ async function handleFetchProxies(request, env, corsHeaders) {
 
 	// Проксируем запрос к mtpro.xyz через CF (нероссийский IP)
 	const resp = await fetch(MTPRO_API, { headers: MTPRO_HEADERS });
-	const data = await resp.text();
+	if (!resp.ok) {
+		return new Response(JSON.stringify({ error: `mtpro.xyz returned ${resp.status}` }), {
+			status: 502,
+			headers: { 'Content-Type': 'application/json', ...corsHeaders },
+		});
+	}
 
-	return new Response(data, {
-		status: resp.status,
+	const all = await resp.json();
+	// Фильтруем только FakeTLS (ee) и отдаём минимум полей
+	const filtered = all
+		.filter(p => p.secret && p.secret.toLowerCase().startsWith('ee'))
+		.map(p => ({ host: p.host, port: p.port, secret: p.secret, country: p.country || '' }));
+
+	return new Response(JSON.stringify(filtered), {
 		headers: { 'Content-Type': 'application/json', ...corsHeaders },
 	});
 }

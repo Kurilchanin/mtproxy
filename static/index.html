@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MTProto Proxy — Россия</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --border: #2a2d3a;
+    --text: #e1e4ed;
+    --muted: #8b8fa3;
+    --accent: #6c63ff;
+    --green: #22c55e;
+    --red: #ef4444;
+    --yellow: #eab308;
+    --blue: #3b82f6;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+  .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+
+  header {
+    border-bottom: 1px solid var(--border);
+    padding: 20px 0;
+    margin-bottom: 20px;
+  }
+  header h1 { font-size: 20px; font-weight: 600; }
+  header p { color: var(--muted); font-size: 13px; margin-top: 4px; }
+
+  .russia-banner {
+    background: linear-gradient(135deg, rgba(59,130,246,0.12), rgba(239,68,68,0.12));
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 18px;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .russia-banner .flag { font-size: 24px; }
+  .russia-banner .text { font-size: 13px; color: var(--text); }
+  .russia-banner .text strong { color: var(--green); }
+
+  .info-bar {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+    padding: 14px 18px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  .info-item { display: flex; align-items: center; gap: 8px; }
+  .info-label { color: var(--muted); font-size: 12px; }
+  .info-value { font-weight: 600; }
+  .info-value.green { color: var(--green); }
+  .info-value.yellow { color: var(--yellow); }
+  .info-value.blue { color: var(--blue); }
+
+  .controls {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  select, input {
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    padding: 8px 14px;
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 13px;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  thead th {
+    text-align: left;
+    padding: 10px 12px;
+    background: var(--surface);
+    border-bottom: 2px solid var(--border);
+    color: var(--muted);
+    font-weight: 500;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+  }
+  thead th:hover { color: var(--text); }
+  tbody td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  tbody tr:hover { background: rgba(108, 99, 255, 0.05); }
+
+  .status-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 6px;
+    background: var(--green);
+    box-shadow: 0 0 6px var(--green);
+  }
+
+  .badge {
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 500;
+  }
+  .badge.faketls { background: rgba(59,130,246,0.15); color: var(--blue); }
+  .badge.dd, .badge.plain { background: rgba(234,179,8,0.15); color: var(--yellow); }
+
+  .tg-link {
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 12px;
+  }
+  .tg-link:hover { text-decoration: underline; }
+
+  .ping { font-variant-numeric: tabular-nums; }
+  .ping.fast { color: var(--green); }
+  .ping.medium { color: var(--yellow); }
+  .ping.slow { color: var(--red); }
+
+  .empty {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--muted);
+  }
+
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+  .updating-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--yellow);
+  }
+  .updating-indicator .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--yellow);
+    animation: pulse-dot 1s infinite;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>MTProto Proxy — Рабочие прокси</h1>
+    <p>Автоматическая проверка 24/7. Показаны только работающие прокси.</p>
+  </header>
+
+  <div class="russia-banner">
+    <span class="flag">&#127479;&#127482;</span>
+    <div class="text">
+      Сканирование и проверка прокси производится <strong>из России</strong>.
+      Все прокси в списке проверены реальными криптографическими handshake-ами с российского сервера —
+      вы видите только те, которые <strong>действительно работают</strong> из РФ прямо сейчас.
+    </div>
+  </div>
+
+  <div class="info-bar" id="infoBar">
+    <div class="info-item">
+      <span class="info-label">Рабочих прокси:</span>
+      <span class="info-value green" id="aliveCount">...</span>
+    </div>
+    <div class="info-item">
+      <span class="info-label">Обновлено:</span>
+      <span class="info-value" id="lastUpdate">...</span>
+    </div>
+    <div class="info-item" id="updatingItem" style="display:none;">
+      <span class="updating-indicator"><span class="dot"></span> Обновление...</span>
+    </div>
+  </div>
+
+  <div class="controls">
+    <select id="filterCountry" onchange="applyFilters()">
+      <option value="">Все страны</option>
+    </select>
+    <select id="filterType" onchange="applyFilters()">
+      <option value="">Все типы</option>
+      <option value="faketls">FakeTLS (ee)</option>
+      <option value="dd">dd</option>
+      <option value="plain">plain</option>
+    </select>
+    <input type="text" id="searchHost" placeholder="Поиск по хосту..." oninput="applyFilters()">
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th onclick="sortBy('index')">#</th>
+        <th onclick="sortBy('host')">Host</th>
+        <th onclick="sortBy('port')">Port</th>
+        <th onclick="sortBy('country')">Страна</th>
+        <th onclick="sortBy('proxy_type')">Тип</th>
+        <th onclick="sortBy('latency_ms')">Ping</th>
+        <th>Подключить</th>
+      </tr>
+    </thead>
+    <tbody id="proxyTable"></tbody>
+  </table>
+</div>
+
+<script>
+let allProxies = [];
+let displayProxies = [];
+let sortField = 'latency_ms';
+let sortAsc = true;
+
+const REFRESH_INTERVAL = 60000; // обновляем список каждую минуту
+
+function countryToFlag(cc) {
+  if (!cc || cc.length !== 2) return '';
+  return String.fromCodePoint(...[...cc.toUpperCase()].map(c => 0x1F1E6 + c.charCodeAt(0) - 65));
+}
+
+async function loadProxies() {
+  try {
+    const [proxiesResp, statusResp] = await Promise.all([
+      fetch('/api/proxies'),
+      fetch('/api/status'),
+    ]);
+    const data = await proxiesResp.json();
+    const status = await statusResp.json();
+
+    allProxies = data.proxies.map((p, i) => ({ ...p, index: i + 1 }));
+
+    document.getElementById('aliveCount').textContent = allProxies.length;
+
+    if (data.last_update) {
+      const d = new Date(data.last_update * 1000);
+      document.getElementById('lastUpdate').textContent = d.toLocaleTimeString('ru-RU');
+    }
+
+    document.getElementById('updatingItem').style.display = status.updating ? '' : 'none';
+
+    // Заполняем фильтр стран (один раз)
+    const sel = document.getElementById('filterCountry');
+    const currentVal = sel.value;
+    const countries = [...new Set(allProxies.map(p => p.country).filter(Boolean))].sort();
+    // Обновляем только если изменились
+    if (sel.options.length - 1 !== countries.length) {
+      sel.innerHTML = '<option value="">Все страны</option>';
+      countries.forEach(cc => {
+        const opt = document.createElement('option');
+        opt.value = cc;
+        opt.textContent = `${countryToFlag(cc)} ${cc}`;
+        sel.appendChild(opt);
+      });
+      sel.value = currentVal;
+    }
+
+    applyFilters();
+  } catch (e) {
+    console.error('Ошибка загрузки:', e);
+  }
+}
+
+function applyFilters() {
+  const cc = document.getElementById('filterCountry').value;
+  const type = document.getElementById('filterType').value;
+  const search = document.getElementById('searchHost').value.toLowerCase();
+
+  displayProxies = allProxies.filter(p => {
+    if (cc && p.country !== cc) return false;
+    if (type && p.proxy_type !== type) return false;
+    if (search && !p.host.toLowerCase().includes(search)) return false;
+    return true;
+  });
+
+  doSort();
+  renderTable();
+}
+
+function sortBy(field) {
+  if (sortField === field) {
+    sortAsc = !sortAsc;
+  } else {
+    sortField = field;
+    sortAsc = true;
+  }
+  doSort();
+  renderTable();
+}
+
+function doSort() {
+  displayProxies.sort((a, b) => {
+    let va = a[sortField], vb = b[sortField];
+    if (va == null) va = sortField.includes('ping') || sortField === 'latency_ms' ? 99999 : '';
+    if (vb == null) vb = sortField.includes('ping') || sortField === 'latency_ms' ? 99999 : '';
+    if (typeof va === 'number' && typeof vb === 'number') return sortAsc ? va - vb : vb - va;
+    return sortAsc ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va));
+  });
+}
+
+function renderTable() {
+  const tbody = document.getElementById('proxyTable');
+  if (displayProxies.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" class="empty">Прокси загружаются... Первая проверка занимает ~2 минуты.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = displayProxies.map((p, i) => {
+    const flag = countryToFlag(p.country);
+    const typeClass = p.proxy_type || '';
+    const ping = p.latency_ms >= 0 ? p.latency_ms + 'ms' : '-';
+    const pingClass = p.latency_ms >= 0 ? (p.latency_ms < 500 ? 'fast' : p.latency_ms < 2000 ? 'medium' : 'slow') : '';
+    const tgLink = `tg://proxy?server=${p.host}&port=${p.port}&secret=${p.secret}`;
+    const webLink = `https://t.me/proxy?server=${p.host}&port=${p.port}&secret=${p.secret}`;
+
+    return `<tr>
+      <td>${i + 1}</td>
+      <td>${p.host}</td>
+      <td>${p.port}</td>
+      <td>${flag} ${p.country || '??'}</td>
+      <td><span class="badge ${typeClass}">${p.proxy_type}</span></td>
+      <td class="ping ${pingClass}">${ping}</td>
+      <td><a href="${tgLink}" class="tg-link">TG</a> · <a href="${webLink}" class="tg-link" target="_blank">Web</a></td>
+    </tr>`;
+  }).join('');
+}
+
+// Автообновление
+loadProxies();
+setInterval(loadProxies, REFRESH_INTERVAL);
+</script>
+</body>
+</html>

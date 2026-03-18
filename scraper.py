@@ -1,10 +1,11 @@
 """
 Модуль скрапинга и проверки MTProto прокси.
 
-Только FakeTLS (ee) проверка:
-  1. TLS Client Hello с HMAC-SHA256(secret).
-     Прокси верифицирует HMAC — если отвечает Server Hello, значит принял наш secret.
-  2. Быстрый TCP фильтр на первом этапе отсеивает мёртвые порты.
+End-to-end FakeTLS проверка:
+  1. TLS Client Hello с HMAC-SHA256(secret) → Server Hello
+  2. Obfuscated2 init через TLS туннель
+  3. req_pq_multi → Telegram DC через прокси
+  4. resPQ ответ = прокси реально проксирует трафик до Telegram
 """
 
 import asyncio
@@ -16,6 +17,7 @@ import struct
 import time
 
 import aiohttp
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 API_URL = "https://mtpro.xyz/api/?type=mtprotoS"
 HEADERS = {
@@ -150,52 +152,172 @@ def build_client_hello(secret_16: bytes, sni_domain: str) -> bytes:
     return bytes(msg)
 
 
-async def check_faketls(host: str, port: int, secret_16: bytes, sni: str) -> tuple[bool, float, str]:
+# ===================== Obfuscated2 + MTProto helpers =====================
+
+MTPROTO_DC2 = 2  # Telegram DC2 (149.154.167.51)
+
+
+def _tls_appdata(payload: bytes) -> bytes:
+    """Оборачивает payload в TLS Application Data record."""
+    return b"\x17\x03\x03" + struct.pack("!H", len(payload)) + payload
+
+
+def _parse_tls_appdata(data: bytes) -> bytes:
+    """Извлекает payload из TLS Application Data records."""
+    payload = b""
+    pos = 0
+    while pos + 5 <= len(data):
+        rec_type = data[pos]
+        rec_len = struct.unpack("!H", data[pos + 3 : pos + 5])[0]
+        if rec_type == 0x17:  # Application Data
+            end = min(pos + 5 + rec_len, len(data))
+            payload += data[pos + 5 : end]
+        pos += 5 + rec_len
+    return payload
+
+
+async def _read_tls_handshake(reader, timeout: float, max_bytes: int = 32768) -> bytes:
+    """Вычитывает полный TLS handshake response (все records полностью)."""
+    buf = bytearray()
+    while len(buf) < max_bytes:
+        chunk = await asyncio.wait_for(reader.read(8192), timeout=timeout)
+        if not chunk:
+            break
+        buf.extend(chunk)
+        # Проверяем: все TLS records полностью вычитаны?
+        pos = 0
+        while pos + 5 <= len(buf):
+            rec_len = struct.unpack("!H", buf[pos + 3 : pos + 5])[0]
+            pos += 5 + rec_len
+        if pos == len(buf) and pos > 0:
+            break  # все records ровно вычитаны
+    return bytes(buf)
+
+
+def _build_obfuscated2_init(dc_idx: int = MTPROTO_DC2) -> bytearray:
+    """Генерирует 64-байтный obfuscated2 init header."""
+    while True:
+        init = bytearray(os.urandom(64))
+        if init[0] == 0xEF:
+            continue
+        first4 = bytes(init[:4])
+        if first4 in (b"\xee\xee\xee\xee", b"\xdd\xdd\xdd\xdd",
+                       b"POST", b"GET ", b"HEAD", b"OPTI"):
+            continue
+        if init[4:8] == b"\x00\x00\x00\x00":
+            continue
+        break
+    # Intermediate protocol tag
+    init[56:60] = b"\xee\xee\xee\xee"
+    # DC index (signed int16 LE)
+    struct.pack_into("<h", init, 60, dc_idx)
+    init[62:64] = b"\x00\x00"
+    return init
+
+
+def _build_req_pq_multi() -> bytes:
+    """Строит unencrypted req_pq_multi — первый MTProto запрос."""
+    nonce = os.urandom(16)
+    msg_id = int(time.time() * (1 << 32))
+    msg_id -= msg_id % 4
+    return (
+        b"\x00" * 8                          # auth_key_id = 0
+        + struct.pack("<q", msg_id)           # message_id
+        + struct.pack("<i", 20)               # message_data_length
+        + struct.pack("<I", 0xBE7E8EF1)      # req_pq_multi constructor
+        + nonce                               # 16-byte nonce
+    )
+
+
+# ===================== Deep FakeTLS check =====================
+
+async def check_faketls(host: str, port: int, secret_16: bytes, sni: str) -> tuple[bool, str]:
     """
-    FakeTLS проверка:
-    1. TCP connect
-    2. Отправляем TLS Client Hello с HMAC(secret)
-    3. Прокси верифицирует HMAC
-    4. Если отвечает TLS Server Hello (0x16 0x03 ...) → прокси принял наш secret → 100% рабочий
+    End-to-end FakeTLS проверка:
+    1. TLS ClientHello с HMAC(secret) → ServerHello
+    2. Obfuscated2 init через TLS Application Data
+    3. req_pq_multi → Telegram DC через прокси
+    4. resPQ ответ = прокси реально работает
     """
     if len(secret_16) != 16:
-        return False, 0, "bad_secret"
+        return False, "bad_secret"
 
-    t0 = time.time()
     reader, writer = await asyncio.wait_for(
         asyncio.open_connection(host, port),
         timeout=FAKETLS_TIMEOUT,
     )
 
     try:
+        # --- Step 1: FakeTLS handshake ---
         hello = build_client_hello(secret_16, sni)
         writer.write(hello)
         await writer.drain()
 
-        response = await asyncio.wait_for(reader.read(4096), timeout=FAKETLS_TIMEOUT)
-        latency = (time.time() - t0) * 1000
+        hs_resp = await _read_tls_handshake(reader, timeout=FAKETLS_TIMEOUT)
 
-        if not response:
-            return False, latency, "empty_response"
+        if not hs_resp or len(hs_resp) < 6:
+            return False, "empty_response"
+        if hs_resp[0] == 0x15:
+            return False, "tls_alert"
+        if hs_resp[0] != 0x16 or hs_resp[1] != 0x03:
+            return False, f"bad_tls(0x{hs_resp[0]:02x})"
 
-        if (len(response) >= 6
-                and response[0] == 0x16
-                and response[1] == 0x03
-                and response[5] == 0x02):
-            return True, latency, "faketls_ok"
+        # --- Step 2: Client CCS (прокси пропустит его) ---
+        writer.write(b"\x14\x03\x03\x00\x01\x01")
+        await writer.drain()
 
-        if (len(response) >= 6
-                and response[0] == 0x16
-                and response[1] == 0x03):
-            return True, latency, "faketls_ok_compat"
+        # --- Step 3: Obfuscated2 init ---
+        init = _build_obfuscated2_init()
 
-        if response[0] == 0x15:
-            return False, latency, "tls_alert"
+        # Ключ шифрования (client → proxy)
+        enc_key = hashlib.sha256(bytes(init[8:40]) + secret_16).digest()
+        enc_iv = bytes(init[40:56])
 
-        if response[:4] in (b"HTTP", b"GET ", b"POST"):
-            return False, latency, "http_not_proxy"
+        # Ключ дешифрования (proxy → client): reversed prekey+iv
+        rev = bytes(init[8:56])[::-1]
+        dec_key = hashlib.sha256(rev[:32] + secret_16).digest()
+        dec_iv = rev[32:]
 
-        return False, latency, f"unknown_resp(0x{response[0]:02x})"
+        enc_cipher = Cipher(algorithms.AES(enc_key), modes.CTR(enc_iv)).encryptor()
+        dec_cipher = Cipher(algorithms.AES(dec_key), modes.CTR(dec_iv)).decryptor()
+
+        # Шифруем init: байты 0-55 остаются, 56+ шифруются
+        # (но весь блок прогоняем через cipher для сдвига состояния на 64 байта)
+        enc_full = enc_cipher.update(bytes(init))
+        send_init = bytes(init[:56]) + enc_full[56:]
+
+        writer.write(_tls_appdata(send_init))
+        await writer.drain()
+
+        # --- Step 4: req_pq_multi через прокси ---
+        req_pq = _build_req_pq_multi()
+        # Intermediate transport frame: [4 bytes length LE] [payload]
+        frame = struct.pack("<I", len(req_pq)) + req_pq
+        enc_frame = enc_cipher.update(frame)
+
+        writer.write(_tls_appdata(enc_frame))
+        await writer.drain()
+
+        # --- Step 5: Читаем ответ от Telegram через прокси ---
+        resp = await asyncio.wait_for(reader.read(4096), timeout=FAKETLS_TIMEOUT)
+
+        if not resp:
+            return False, "no_relay_response"
+
+        app_payload = _parse_tls_appdata(resp)
+        if not app_payload:
+            return False, "no_appdata"
+
+        decrypted = dec_cipher.update(app_payload)
+
+        # Intermediate frame: [4 bytes length LE] [MTProto message]
+        # MTProto: auth_key_id(8) + message_id(8) + msg_data_len(4) + constructor(4)
+        if len(decrypted) >= 28:
+            constructor = struct.unpack("<I", decrypted[24:28])[0]
+            if constructor == 0x05162463:  # resPQ
+                return True, "mtproto_ok"
+
+        return False, "bad_mtproto_response"
 
     finally:
         writer.close()
@@ -280,15 +402,13 @@ async def check_one(proxy: dict, sem: asyncio.Semaphore) -> dict:
 
     async with sem:
         try:
-            ok, latency, method = await check_faketls(
+            ok, method = await check_faketls(
                 host, port, parsed["key"], parsed["sni"]
             )
             proxy["status"] = "alive" if ok else "dead"
-            proxy["latency_ms"] = round(latency)
             proxy["check_method"] = method
         except Exception as e:
             proxy["status"] = "dead"
-            proxy["latency_ms"] = -1
             proxy["check_method"] = f"error:{type(e).__name__}"
 
     return proxy
@@ -328,13 +448,12 @@ async def scrape_and_check() -> list[dict]:
 
     # Глубокая проверка FakeTLS
     check_sem = asyncio.Semaphore(MAX_CONCURRENT_CHECK)
-    print(f"[scraper] Глубокая проверка: FakeTLS → HMAC handshake...")
+    print(f"[scraper] Глубокая проверка: FakeTLS → HMAC + MTProto end-to-end...")
     results = await asyncio.gather(
         *(check_one(p, check_sem) for p in candidates)
     )
 
     alive = [p for p in results if p["status"] == "alive"]
-    alive.sort(key=lambda p: p.get("latency_ms", 9999))
 
     from collections import Counter
     methods = Counter(p.get("check_method", "?") for p in results)

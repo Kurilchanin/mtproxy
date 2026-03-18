@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MTProto Proxy — Россия</title>
+<title>MTProto Proxy</title>
 <style>
   :root {
     --bg: #0f1117;
@@ -34,20 +34,6 @@
   }
   header h1 { font-size: 20px; font-weight: 600; }
   header p { color: var(--muted); font-size: 13px; margin-top: 4px; }
-
-  .russia-banner {
-    background: linear-gradient(135deg, rgba(59,130,246,0.12), rgba(239,68,68,0.12));
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 14px 18px;
-    margin-bottom: 20px;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-  .russia-banner .flag { font-size: 24px; }
-  .russia-banner .text { font-size: 13px; color: var(--text); }
-  .russia-banner .text strong { color: var(--green); }
 
   .info-bar {
     display: flex;
@@ -137,10 +123,12 @@
   }
   .tg-link:hover { text-decoration: underline; }
 
-  .ping { font-variant-numeric: tabular-nums; }
-  .ping.fast { color: var(--green); }
-  .ping.medium { color: var(--yellow); }
-  .ping.slow { color: var(--red); }
+  .host-cell {
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 
   .empty {
     text-align: center;
@@ -166,23 +154,22 @@
     background: var(--yellow);
     animation: pulse-dot 1s infinite;
   }
+
+  @media (max-width: 600px) {
+    .container { padding: 10px; }
+    table { font-size: 12px; }
+    thead th, tbody td { padding: 6px 6px; }
+    .host-cell { max-width: 110px; }
+    select, input { font-size: 12px; padding: 6px 10px; }
+  }
 </style>
 </head>
 <body>
 <div class="container">
   <header>
-    <h1>MTProto Proxy — Рабочие прокси</h1>
+    <h1>MTProto Proxy</h1>
     <p>Автоматическая проверка 24/7. Показаны только работающие прокси.</p>
   </header>
-
-  <div class="russia-banner">
-    <span class="flag">&#127479;&#127482;</span>
-    <div class="text">
-      Сканирование и проверка прокси производится <strong>из России</strong>.
-      Все прокси в списке проверены реальными криптографическими handshake-ами с российского сервера —
-      вы видите только те, которые <strong>действительно работают</strong> из РФ прямо сейчас.
-    </div>
-  </div>
 
   <div class="info-bar" id="infoBar">
     <div class="info-item">
@@ -215,7 +202,6 @@
         <th onclick="sortBy('host')">Host</th>
         <th onclick="sortBy('port')">Port</th>
         <th onclick="sortBy('country')">Страна</th>
-        <th onclick="sortBy('latency_ms')">Ping</th>
         <th>Подключить</th>
       </tr>
     </thead>
@@ -226,7 +212,7 @@
 <script>
 let allProxies = [];
 let displayProxies = [];
-let sortField = 'latency_ms';
+let sortField = 'index';
 let sortAsc = true;
 
 const REFRESH_INTERVAL = 60000; // обновляем список каждую минуту
@@ -308,8 +294,8 @@ function sortBy(field) {
 function doSort() {
   displayProxies.sort((a, b) => {
     let va = a[sortField], vb = b[sortField];
-    if (va == null) va = sortField.includes('ping') || sortField === 'latency_ms' ? 99999 : '';
-    if (vb == null) vb = sortField.includes('ping') || sortField === 'latency_ms' ? 99999 : '';
+    if (va == null) va = '';
+    if (vb == null) vb = '';
     if (typeof va === 'number' && typeof vb === 'number') return sortAsc ? va - vb : vb - va;
     return sortAsc ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va));
   });
@@ -318,23 +304,20 @@ function doSort() {
 function renderTable() {
   const tbody = document.getElementById('proxyTable');
   if (displayProxies.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" class="empty">Прокси загружаются... Первая проверка занимает ~2 минуты.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" class="empty">Прокси загружаются... Первая проверка занимает ~2 минуты.</td></tr>';
     return;
   }
 
   tbody.innerHTML = displayProxies.map((p, i) => {
     const flag = countryToFlag(p.country);
-    const ping = p.latency_ms >= 0 ? p.latency_ms + 'ms' : '-';
-    const pingClass = p.latency_ms >= 0 ? (p.latency_ms < 500 ? 'fast' : p.latency_ms < 2000 ? 'medium' : 'slow') : '';
     const tgLink = `tg://proxy?server=${p.host}&port=${p.port}&secret=${p.secret}`;
     const webLink = `https://t.me/proxy?server=${p.host}&port=${p.port}&secret=${p.secret}`;
 
     return `<tr>
       <td>${i + 1}</td>
-      <td>${p.host}</td>
+      <td class="host-cell" title="${p.host}">${p.host}</td>
       <td>${p.port}</td>
       <td>${flag} ${p.country || '??'}</td>
-      <td class="ping ${pingClass}">${ping}</td>
       <td><a href="${tgLink}" class="tg-link">TG</a> · <a href="${webLink}" class="tg-link" target="_blank">Web</a></td>
     </tr>`;
   }).join('');

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 MTProto Proxy Checker — Web Application
-Автоматическая проверка прокси 24/7 с российского сервера.
-Показывает только рабочие прокси. Отправляет лучшие в CF Worker KV.
+Автоматическая проверка прокси 24/7.
+Показывает только рабочие прокси. Отправляет в CF Worker KV.
 """
 
 import asyncio
@@ -30,23 +30,11 @@ UPDATE_INTERVAL = 600
 CF_WORKER_URL = os.environ.get("CF_WORKER_URL", "")
 CF_API_TOKEN = os.environ.get("CF_API_TOKEN", "")
 
-MIN_PING = 50
-MAX_PING = 500
-
-
 async def push_to_cf(proxies: list[dict]):
-    """Отправляет отфильтрованные прокси (ping 50-500ms) в CF Worker KV."""
+    """Отправляет проверенные прокси в CF Worker KV."""
     if not CF_WORKER_URL or not CF_API_TOKEN:
         print("[cf] CF_WORKER_URL или CF_API_TOKEN не заданы — пропускаю отправку")
         return
-
-    # Фильтруем по пингу 50-500ms
-    filtered = [
-        p for p in proxies
-        if MIN_PING <= p.get("latency_ms", -1) <= MAX_PING
-    ]
-    # Сортируем по пингу
-    filtered.sort(key=lambda p: p.get("latency_ms", 9999))
 
     # Отправляем только нужные поля
     payload = [
@@ -54,11 +42,10 @@ async def push_to_cf(proxies: list[dict]):
             "host": p["host"],
             "port": p["port"],
             "secret": p["secret"],
-            "ping": p.get("latency_ms", 0),
             "country": p.get("country", ""),
             "sni": p.get("sni", ""),
         }
-        for p in filtered
+        for p in proxies
     ]
 
     try:
@@ -70,7 +57,7 @@ async def push_to_cf(proxies: list[dict]):
                 timeout=aiohttp.ClientTimeout(total=10),
             ) as resp:
                 result = await resp.json()
-                print(f"[cf] Отправлено {len(payload)} прокси (ping {MIN_PING}-{MAX_PING}ms) → {resp.status}: {result}")
+                print(f"[cf] Отправлено {len(payload)} прокси → {resp.status}: {result}")
     except Exception as e:
         print(f"[cf] Ошибка отправки: {e}")
 

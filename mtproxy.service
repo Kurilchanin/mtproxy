@@ -6,6 +6,7 @@ After=network.target
 Type=simple
 User=subuntu
 WorkingDirectory=/home/subuntu/mtproxy
+EnvironmentFile=/home/subuntu/mtproxy/.env
 ExecStart=/home/subuntu/mtproxy/venv/bin/python app.py
 Restart=always
 RestartSec=5

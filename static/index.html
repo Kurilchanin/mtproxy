@@ -215,7 +215,7 @@ let displayProxies = [];
 let sortField = 'index';
 let sortAsc = true;
 
-const REFRESH_INTERVAL = 60000; // обновляем список каждую минуту
+const REFRESH_INTERVAL = 3600000; // обновляем список каждые 60 минут
 
 function countryToFlag(cc) {
   if (!cc || cc.length !== 2) return '';

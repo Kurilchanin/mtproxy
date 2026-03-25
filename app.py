@@ -23,8 +23,8 @@ proxy_store: dict = {
     "updating": False,
 }
 
-# Интервал обновления — 10 минут
-UPDATE_INTERVAL = 600
+# Интервал обновления — 60 минут
+UPDATE_INTERVAL = 3600
 
 # Cloudflare Worker
 CF_WORKER_URL = os.environ.get("CF_WORKER_URL", "")

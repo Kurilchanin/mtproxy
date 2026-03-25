@@ -1,7 +1,9 @@
-name = "mtproxy-api"
+name = "mtproxy"
 main = "src/index.js"
 compatibility_date = "2024-01-01"
 
+workers_dev = true
+
 [[kv_namespaces]]
 binding = "PROXIES"
-id = "YOUR_KV_NAMESPACE_ID"
+id = "35028ab560d5467487168ba8a0741407"

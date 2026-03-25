@@ -18,8 +18,64 @@ const MTPRO_HEADERS = {
 
 const CANONICAL_URL = 'https://mtproxy.geckocloud.workers.dev';
 
+const TOP_N = 10;
+
+// ——— Telegram Bot ———
+
+function countryFlag(code) {
+	if (!code || code.length !== 2) return '\u{1F310}';
+	const upper = code.toUpperCase();
+	return String.fromCodePoint(0x1F1E6 + upper.charCodeAt(0) - 65, 0x1F1E6 + upper.charCodeAt(1) - 65);
+}
+
+function formatTgMessage(proxies) {
+	return `\u{1F512} <b>MTProto Proxy</b>\n\nНажмите кнопку для подключения \u{1F447}`;
+}
+
+function buildKeyboard(proxies) {
+	return proxies.map((p, i) => {
+		const flag = countryFlag(p.country);
+		const url = `tg://proxy?server=${p.host}&port=${p.port}&secret=${p.secret}`;
+		return [{ text: `${flag} ${p.host}:${p.port}`, url }];
+	});
+}
+
+async function sendToTelegram(proxies, env) {
+	const botToken = env.TG_BOT_TOKEN;
+	const channelId = env.TG_CHANNEL_ID;
+
+	if (!botToken || !channelId) {
+		console.log('[tg] TG_BOT_TOKEN или TG_CHANNEL_ID не заданы — пропускаю');
+		return;
+	}
+
+	const top = proxies.slice(0, TOP_N);
+	if (!top.length) return;
+
+	const text = formatTgMessage(top);
+	const keyboard = buildKeyboard(top);
+
+	const resp = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({
+			chat_id: channelId,
+			text,
+			parse_mode: 'HTML',
+			reply_markup: { inline_keyboard: keyboard },
+		}),
+	});
+
+	const result = await resp.json();
+	if (result.ok) {
+		console.log(`[tg] Отправлено ${top.length} прокси в канал`);
+	} else {
+		console.log(`[tg] Ошибка Telegram API: ${JSON.stringify(result)}`);
+	}
+}
+
 export default {
-	async fetch(request, env) {
+	async fetch(request, env, ctx) {
 		const url = new URL(request.url);
 		const path = url.pathname;
 
@@ -68,7 +124,7 @@ export default {
 
 		if (path === '/api/proxies') {
 			if (request.method === 'POST') {
-				return handlePost(request, env, corsHeaders);
+				return handlePost(request, env, ctx, corsHeaders);
 			}
 			if (request.method === 'GET') {
 				return handleGet(url, env, corsHeaders);
@@ -119,7 +175,7 @@ const i18n = {
 			},
 			{
 				q: 'Как часто обновляется список?',
-				a: 'Список обновляется автоматически каждые 10 минут. Прокси сканируются, фильтруются и проверяются криптографическими handshake-ами 24/7. Вы видите только те прокси, которые работают прямо сейчас.',
+				a: 'Список обновляется автоматически каждые 60 минут. Прокси сканируются, фильтруются и проверяются криптографическими handshake-ами 24/7. Вы видите только те прокси, которые работают прямо сейчас.',
 			},
 		],
 		footerText: 'Бесплатные MTProto прокси для Telegram. Автоматическая проверка 24/7.',
@@ -162,7 +218,7 @@ const i18n = {
 			},
 			{
 				q: 'How often is the list updated?',
-				a: 'The list is updated automatically every 10 minutes. Proxies are scanned, filtered, and verified with cryptographic handshakes 24/7. You only see proxies that are working right now.',
+				a: 'The list is updated automatically every 60 minutes. Proxies are scanned, filtered, and verified with cryptographic handshakes 24/7. You only see proxies that are working right now.',
 			},
 		],
 		footerText: 'Free MTProto proxies for Telegram. Automatic verification 24/7.',
@@ -725,7 +781,7 @@ async function handleFetchProxies(request, env, corsHeaders) {
 	});
 }
 
-async function handlePost(request, env, corsHeaders) {
+async function handlePost(request, env, ctx, corsHeaders) {
 	const auth = request.headers.get('Authorization');
 	if (!auth || auth !== `Bearer ${env.API_TOKEN}`) {
 		return new Response(JSON.stringify({ error: 'unauthorized' }), {
@@ -746,6 +802,9 @@ async function handlePost(request, env, corsHeaders) {
 
 	await env.PROXIES.put('proxies', JSON.stringify(proxies), { expirationTtl: 900 });
 	await env.PROXIES.put('updated_at', new Date().toISOString(), { expirationTtl: 900 });
+
+	// Отправляем топ прокси в Telegram-канал (не блокируем ответ клиенту)
+	ctx.waitUntil(sendToTelegram(proxies, env).catch(e => console.log(`[tg] Ошибка: ${e}`)));
 
 	return new Response(JSON.stringify({ ok: true, count: proxies.length }), {
 		headers: { 'Content-Type': 'application/json', ...corsHeaders },

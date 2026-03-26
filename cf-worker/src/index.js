@@ -259,7 +259,7 @@ const i18n = {
 			},
 			{
 				q: 'لیست هر چند وقت به‌روز می‌شود؟',
-				a: 'لیست هر ۱۰ دقیقه به‌صورت خودکار به‌روز می‌شود. پراکسی‌ها اسکن، فیلتر و با handshake‌های رمزنگاری ۲۴/۷ تایید می‌شوند. شما فقط پراکسی‌هایی را می‌بینید که الان کار می‌کنند.',
+				a: 'لیست هر ۶۰ دقیقه به‌صورت خودکار به‌روز می‌شود. پراکسی‌ها اسکن، فیلتر و با handshake‌های رمزنگاری ۲۴/۷ تایید می‌شوند. شما فقط پراکسی‌هایی را می‌بینید که الان کار می‌کنند.',
 			},
 		],
 		footerText: 'پراکسی‌های رایگان MTProto برای تلگرام. تایید خودکار ۲۴/۷.',
@@ -800,8 +800,8 @@ async function handlePost(request, env, ctx, corsHeaders) {
 		});
 	}
 
-	await env.PROXIES.put('proxies', JSON.stringify(proxies), { expirationTtl: 900 });
-	await env.PROXIES.put('updated_at', new Date().toISOString(), { expirationTtl: 900 });
+	await env.PROXIES.put('proxies', JSON.stringify(proxies), { expirationTtl: 7200 });
+	await env.PROXIES.put('updated_at', new Date().toISOString(), { expirationTtl: 7200 });
 
 	// Отправляем топ прокси в Telegram-канал (не блокируем ответ клиенту)
 	ctx.waitUntil(sendToTelegram(proxies, env).catch(e => console.log(`[tg] Ошибка: ${e}`)));

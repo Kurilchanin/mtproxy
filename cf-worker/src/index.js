@@ -63,6 +63,7 @@ async function sendToTelegram(proxies, env) {
 			text,
 			parse_mode: 'HTML',
 			reply_markup: { inline_keyboard: keyboard },
+			disable_notification: true,
 		}),
 	});
 

@@ -321,9 +321,10 @@ async def check_faketls(host: str, port: int, secret_raw: bytes, secret_16: byte
             if not chunk:
                 break
             buf.extend(chunk)
-            # Проверяем, есть ли Application Data в накопленном буфере
+            # Проверяем: достаточно ли Application Data для MTProto ответа
+            # resPQ в intermediate transport: минимум ~60 байт
             app_payload = _parse_tls_appdata(bytes(buf))
-            if app_payload:
+            if len(app_payload) >= 60:
                 break
 
         if not buf:

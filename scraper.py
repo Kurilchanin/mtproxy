@@ -277,12 +277,13 @@ async def check_faketls(host: str, port: int, secret_raw: bytes, secret_16: byte
         init = _build_obfuscated2_init()
 
         # Ключ шифрования (client → proxy)
-        enc_key = hashlib.sha256(bytes(init[8:40]) + secret_16).digest()
+        # mtprotoproxy использует полный секрет (ee+key+sni) для key derivation
+        enc_key = hashlib.sha256(bytes(init[8:40]) + secret_raw).digest()
         enc_iv = bytes(init[40:56])
 
         # Ключ дешифрования (proxy → client): reversed prekey+iv
         rev = bytes(init[8:56])[::-1]
-        dec_key = hashlib.sha256(rev[:32] + secret_16).digest()
+        dec_key = hashlib.sha256(rev[:32] + secret_raw).digest()
         dec_iv = rev[32:]
 
         enc_cipher = Cipher(algorithms.AES(enc_key), modes.CTR(enc_iv)).encryptor()
@@ -351,7 +352,7 @@ async def check_faketls(host: str, port: int, secret_raw: bytes, secret_16: byte
                 return True, "mtproto_ok"
             return False, f"bad_mtproto(0x{constructor:08x},dec_len={len(decrypted)})"
 
-        return False, f"bad_mtproto_response(dec_len={len(decrypted)})"
+        return False, f"bad_mtproto_response(dec_len={len(decrypted)},hex={decrypted[:28].hex()})"
 
     finally:
         writer.close()

@@ -327,7 +327,14 @@ async def check_faketls(host: str, port: int, secret_16: bytes, sni: str) -> tup
 
         app_payload = _parse_tls_appdata(bytes(buf))
         if not app_payload:
-            return False, "no_appdata"
+            # Логируем что пришло вместо Application Data
+            rec_types = []
+            pos = 0
+            while pos + 5 <= len(buf):
+                rec_types.append(f"0x{buf[pos]:02x}")
+                rec_len = struct.unpack("!H", buf[pos + 3 : pos + 5])[0]
+                pos += 5 + rec_len
+            return False, f"no_appdata(got={','.join(rec_types)},len={len(buf)})"
 
         decrypted = dec_cipher.update(app_payload)
 
@@ -337,8 +344,9 @@ async def check_faketls(host: str, port: int, secret_16: bytes, sni: str) -> tup
             constructor = struct.unpack("<I", decrypted[24:28])[0]
             if constructor == 0x05162463:  # resPQ
                 return True, "mtproto_ok"
+            return False, f"bad_mtproto(0x{constructor:08x},dec_len={len(decrypted)})"
 
-        return False, "bad_mtproto_response"
+        return False, f"bad_mtproto_response(dec_len={len(decrypted)})"
 
     finally:
         writer.close()

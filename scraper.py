@@ -265,6 +265,15 @@ async def check_faketls(host: str, port: int, secret_16: bytes, sni: str) -> tup
         if hs_resp[0] != 0x16 or hs_resp[1] != 0x03:
             return False, f"bad_tls(0x{hs_resp[0]:02x})"
 
+        # Проверяем Server Hello HMAC — принял ли прокси наш Client Hello
+        if len(hs_resp) >= 43:
+            server_random = hs_resp[11:43]
+            hs_zeroed = bytearray(hs_resp)
+            hs_zeroed[11:43] = b"\x00" * 32
+            expected = hmac_mod.new(secret_16, hello + bytes(hs_zeroed), hashlib.sha256).digest()
+            if server_random != expected:
+                return False, f"hmac_rejected(resp_len={len(hs_resp)})"
+
         # --- Step 2: Client CCS (прокси пропустит его) ---
         writer.write(b"\x14\x03\x03\x00\x01\x01")
         await writer.drain()

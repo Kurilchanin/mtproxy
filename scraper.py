@@ -43,12 +43,8 @@ def parse_secret(secret_str: str) -> dict:
     s = secret_str.strip()
     lower = s.lower()
 
-    # FakeTLS: ee prefix (hex string)
-    if lower.startswith("ee"):
-        inner = s[2:]
-        return _parse_inner(inner, "faketls")
-
-    # Может быть base64-encoded секрет с типом внутри (ee в первом байте)
+    # Сначала пробуем весь секрет как base64 (tg:// ссылки, и секреты вида eeXXX...
+    # где ee — часть base64, а не hex-префикс)
     try:
         b64 = s.replace("-", "+").replace("_", "/")
         b64 += "=" * (-len(b64) % 4)
@@ -61,6 +57,13 @@ def parse_secret(secret_str: str) -> dict:
             return {"type": "faketls", "key": key, "sni": sni}
     except Exception:
         pass
+
+    # FakeTLS: ee prefix (hex string)
+    if lower.startswith("ee"):
+        inner = s[2:]
+        result = _parse_inner(inner, "faketls")
+        if len(result["key"]) == 16:
+            return result
 
     return {"type": "unknown", "key": b"", "sni": ""}
 
@@ -426,7 +429,7 @@ async def check_one(proxy: dict, sem: asyncio.Semaphore) -> dict:
             proxy["status"] = "alive" if ok else "dead"
             proxy["check_method"] = method
             if "bad_secret" in method:
-                print(f"[scraper] bad_secret: host={host} secret={secret[:20]}... key_len={len(parsed['key'])}")
+                print(f"[scraper] bad_secret: host={host} secret={secret[:40]}... key_len={len(parsed['key'])}")
         except Exception as e:
             proxy["status"] = "dead"
             proxy["check_method"] = f"error:{type(e).__name__}"

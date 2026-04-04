@@ -240,7 +240,7 @@ async def check_faketls(host: str, port: int, secret_16: bytes, sni: str) -> tup
     4. resPQ ответ = прокси реально работает
     """
     if len(secret_16) != 16:
-        return False, "bad_secret"
+        return False, f"bad_secret(len={len(secret_16)})"
 
     reader, writer = await asyncio.wait_for(
         asyncio.open_connection(host, port),
@@ -299,12 +299,30 @@ async def check_faketls(host: str, port: int, secret_16: bytes, sni: str) -> tup
         await writer.drain()
 
         # --- Step 5: Читаем ответ от Telegram через прокси ---
-        resp = await asyncio.wait_for(reader.read(4096), timeout=FAKETLS_TIMEOUT)
+        # Читаем в цикле: первый read может вернуть CCS/Finished от хэндшейка,
+        # а Application Data придёт следующим TCP-сегментом.
+        buf = bytearray()
+        deadline = asyncio.get_event_loop().time() + FAKETLS_TIMEOUT
+        while True:
+            remaining = deadline - asyncio.get_event_loop().time()
+            if remaining <= 0:
+                break
+            try:
+                chunk = await asyncio.wait_for(reader.read(4096), timeout=remaining)
+            except asyncio.TimeoutError:
+                break
+            if not chunk:
+                break
+            buf.extend(chunk)
+            # Проверяем, есть ли Application Data в накопленном буфере
+            app_payload = _parse_tls_appdata(bytes(buf))
+            if app_payload:
+                break
 
-        if not resp:
+        if not buf:
             return False, "no_relay_response"
 
-        app_payload = _parse_tls_appdata(resp)
+        app_payload = _parse_tls_appdata(bytes(buf))
         if not app_payload:
             return False, "no_appdata"
 
@@ -407,6 +425,8 @@ async def check_one(proxy: dict, sem: asyncio.Semaphore) -> dict:
             )
             proxy["status"] = "alive" if ok else "dead"
             proxy["check_method"] = method
+            if "bad_secret" in method:
+                print(f"[scraper] bad_secret: host={host} secret={secret[:20]}... key_len={len(parsed['key'])}")
         except Exception as e:
             proxy["status"] = "dead"
             proxy["check_method"] = f"error:{type(e).__name__}"

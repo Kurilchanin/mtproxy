@@ -269,6 +269,24 @@ async def check_faketls(host: str, port: int, secret_raw: bytes, secret_16: byte
         if hs_resp[0] != 0x16 or hs_resp[1] != 0x03:
             return False, f"bad_tls(0x{hs_resp[0]:02x})"
 
+        # Дочитываем оставшиеся записи хэндшейка (CCS + AppData с fake cert),
+        # которые могли не попасть в первый read
+        try:
+            extra = await asyncio.wait_for(reader.read(8192), timeout=1.0)
+            if extra:
+                hs_resp = hs_resp + extra
+                # Может быть ещё — дочитаем все complete records
+                while True:
+                    try:
+                        more = await asyncio.wait_for(reader.read(8192), timeout=0.5)
+                        if not more:
+                            break
+                        hs_resp = hs_resp + more
+                    except asyncio.TimeoutError:
+                        break
+        except asyncio.TimeoutError:
+            pass
+
         # --- Step 2: Client CCS (прокси пропустит его) ---
         writer.write(b"\x14\x03\x03\x00\x01\x01")
         await writer.drain()
@@ -276,14 +294,13 @@ async def check_faketls(host: str, port: int, secret_raw: bytes, secret_16: byte
         # --- Step 3: Obfuscated2 init ---
         init = _build_obfuscated2_init()
 
-        # Ключ шифрования (client → proxy)
-        # obfuscated2 использует 16-byte key для key derivation
-        enc_key = hashlib.sha256(bytes(init[8:40]) + secret_16).digest()
+        # Ключ шифрования/дешифрования — mtprotoproxy использует полный секрет
+        enc_key = hashlib.sha256(bytes(init[8:40]) + secret_raw).digest()
         enc_iv = bytes(init[40:56])
 
         # Ключ дешифрования (proxy → client): reversed prekey+iv
         rev = bytes(init[8:56])[::-1]
-        dec_key = hashlib.sha256(rev[:32] + secret_16).digest()
+        dec_key = hashlib.sha256(rev[:32] + secret_raw).digest()
         dec_iv = rev[32:]
 
         enc_cipher = Cipher(algorithms.AES(enc_key), modes.CTR(enc_iv)).encryptor()
@@ -350,9 +367,9 @@ async def check_faketls(host: str, port: int, secret_raw: bytes, secret_16: byte
             constructor = struct.unpack("<I", decrypted[24:28])[0]
             if constructor == 0x05162463:  # resPQ
                 return True, "mtproto_ok"
-            return False, f"bad_mtproto(0x{constructor:08x},dec_len={len(decrypted)})"
+            return False, f"bad_mtproto(0x{constructor:08x},dec={len(decrypted)},app={len(app_payload)},hs={len(hs_resp)})"
 
-        return False, f"bad_mtproto_response(dec_len={len(decrypted)},hex={decrypted[:28].hex()})"
+        return False, f"bad_resp(dec={len(decrypted)},app={len(app_payload)},hs={len(hs_resp)},hex={decrypted.hex()})"
 
     finally:
         writer.close()

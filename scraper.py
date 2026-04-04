@@ -54,7 +54,7 @@ def parse_secret(secret_str: str) -> dict:
             sni = ""
             if len(raw) > 17:
                 sni = raw[17:].decode("ascii", errors="ignore").rstrip("\x00")
-            return {"type": "faketls", "key": key, "sni": sni}
+            return {"type": "faketls", "key": key, "sni": sni, "raw": raw}
     except Exception:
         pass
 
@@ -65,7 +65,7 @@ def parse_secret(secret_str: str) -> dict:
         if len(result["key"]) == 16:
             return result
 
-    return {"type": "unknown", "key": b"", "sni": ""}
+    return {"type": "unknown", "key": b"", "sni": "", "raw": b""}
 
 
 def _parse_inner(inner: str, ptype: str) -> dict:
@@ -78,7 +78,7 @@ def _parse_inner(inner: str, ptype: str) -> dict:
         key = raw[:16]
         if len(raw) > 16:
             sni = raw[16:].decode("ascii", errors="ignore").rstrip("\x00")
-        return {"type": ptype, "key": key, "sni": sni}
+        return {"type": ptype, "key": key, "sni": sni, "raw": b"\xee" + raw}
     except ValueError:
         pass
 
@@ -90,18 +90,19 @@ def _parse_inner(inner: str, ptype: str) -> dict:
         key = raw[:16]
         if len(raw) > 16:
             sni = raw[16:].decode("ascii", errors="ignore").rstrip("\x00")
-        return {"type": ptype, "key": key, "sni": sni}
+        return {"type": ptype, "key": key, "sni": sni, "raw": b"\xee" + raw}
     except Exception:
         pass
 
-    return {"type": ptype, "key": b"", "sni": ""}
+    return {"type": ptype, "key": b"", "sni": "", "raw": b""}
 
 
 # ===================== FakeTLS Client Hello =====================
 
-def build_client_hello(secret_16: bytes, sni_domain: str) -> bytes:
+def build_client_hello(secret_raw: bytes, sni_domain: str) -> bytes:
     """
     Строит TLS Client Hello ровно 517 байт — как в mtprotoproxy.
+    secret_raw: полный секрет (ee + key + sni) — используется как HMAC ключ.
     Формат random (из исходников mtprotoproxy handle_fake_tls_handshake):
       computed_digest = HMAC-SHA256(secret, hello_with_zero_random)
       xored = actual_random XOR computed_digest
@@ -143,7 +144,7 @@ def build_client_hello(secret_16: bytes, sni_domain: str) -> bytes:
 
     # Теперь msg ровно 517 байт с нулевым random на позиции [11:43]
     # Вычисляем HMAC
-    digest = hmac_mod.new(secret_16, bytes(msg), hashlib.sha256).digest()
+    digest = hmac_mod.new(secret_raw, bytes(msg), hashlib.sha256).digest()
 
     # random = digest XOR (zeros[28] + timestamp_le[4])
     timestamp = struct.pack("<I", int(time.time()))
@@ -234,13 +235,16 @@ def _build_req_pq_multi() -> bytes:
 
 # ===================== Deep FakeTLS check =====================
 
-async def check_faketls(host: str, port: int, secret_16: bytes, sni: str) -> tuple[bool, str]:
+async def check_faketls(host: str, port: int, secret_raw: bytes, secret_16: bytes, sni: str) -> tuple[bool, str]:
     """
     End-to-end FakeTLS проверка:
     1. TLS ClientHello с HMAC(secret) → ServerHello
     2. Obfuscated2 init через TLS Application Data
     3. req_pq_multi → Telegram DC через прокси
     4. resPQ ответ = прокси реально работает
+
+    secret_raw: полный секрет (ee + key + sni bytes) — используется как HMAC ключ
+    secret_16: 16-байт ключ — используется для obfuscated2
     """
     if len(secret_16) != 16:
         return False, f"bad_secret(len={len(secret_16)})"
@@ -252,7 +256,7 @@ async def check_faketls(host: str, port: int, secret_16: bytes, sni: str) -> tup
 
     try:
         # --- Step 1: FakeTLS handshake ---
-        hello = build_client_hello(secret_16, sni)
+        hello = build_client_hello(secret_raw, sni)
         writer.write(hello)
         await writer.drain()
 
@@ -266,11 +270,13 @@ async def check_faketls(host: str, port: int, secret_16: bytes, sni: str) -> tup
             return False, f"bad_tls(0x{hs_resp[0]:02x})"
 
         # Проверяем Server Hello HMAC — принял ли прокси наш Client Hello
+        # Формула из mtprotoproxy: HMAC(secret, client_random + server_hello_zeroed)
         if len(hs_resp) >= 43:
+            client_random = hello[11:43]
             server_random = hs_resp[11:43]
             hs_zeroed = bytearray(hs_resp)
             hs_zeroed[11:43] = b"\x00" * 32
-            expected = hmac_mod.new(secret_16, hello + bytes(hs_zeroed), hashlib.sha256).digest()
+            expected = hmac_mod.new(secret_raw, client_random + bytes(hs_zeroed), hashlib.sha256).digest()
             if server_random != expected:
                 return False, f"hmac_rejected(resp_len={len(hs_resp)})"
 
@@ -441,7 +447,7 @@ async def check_one(proxy: dict, sem: asyncio.Semaphore) -> dict:
     async with sem:
         try:
             ok, method = await check_faketls(
-                host, port, parsed["key"], parsed["sni"]
+                host, port, parsed["raw"], parsed["key"], parsed["sni"]
             )
             proxy["status"] = "alive" if ok else "dead"
             proxy["check_method"] = method

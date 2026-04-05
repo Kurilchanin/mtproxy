@@ -99,15 +99,11 @@ def _parse_inner(inner: str, ptype: str) -> dict:
 
 # ===================== FakeTLS Client Hello =====================
 
-def build_client_hello(secret_raw: bytes, sni_domain: str) -> bytes:
+def build_client_hello(secret_16: bytes, sni_domain: str) -> bytes:
     """
-    Строит TLS Client Hello ровно 517 байт — как в mtprotoproxy.
-    secret_raw: полный секрет (ee + key + sni) — используется как HMAC ключ.
-    Формат random (из исходников mtprotoproxy handle_fake_tls_handshake):
-      computed_digest = HMAC-SHA256(secret, hello_with_zero_random)
-      xored = actual_random XOR computed_digest
-      Сервер проверяет: xored[0:28] == zeros, xored[28:32] == timestamp_le
-    Клиент: random = computed_digest XOR (zeros[28] + timestamp_le[4])
+    Строит TLS Client Hello ровно 517 байт.
+    secret_16: 16-байт ключ (secret[1:17], без ee-префикса и домена) — как в tdesktop keyFromSecret().
+    HMAC-SHA256(secret_16, hello_with_zero_random) → random field.
     """
     TARGET_LEN = 517  # TLS_HANDSHAKE_LEN в mtprotoproxy
 
@@ -157,8 +153,8 @@ def build_client_hello(secret_raw: bytes, sni_domain: str) -> bytes:
     msg += b"\x00" * (TARGET_LEN - len(msg))
 
     # Теперь msg ровно 517 байт с нулевым random на позиции [11:43]
-    # Вычисляем HMAC
-    digest = hmac_mod.new(secret_raw, bytes(msg), hashlib.sha256).digest()
+    # HMAC ключ = 16-байт secret (как в tdesktop: _secret.subspan(1, 16))
+    digest = hmac_mod.new(secret_16, bytes(msg), hashlib.sha256).digest()
 
     # random = digest XOR (zeros[28] + timestamp_le[4])
     timestamp = struct.pack("<I", int(time.time()))
@@ -257,8 +253,8 @@ async def check_faketls(host: str, port: int, secret_raw: bytes, secret_16: byte
     3. req_pq_multi → Telegram DC через прокси
     4. resPQ ответ = прокси реально работает
 
-    secret_raw: полный секрет (ee + key + sni bytes) — используется как HMAC ключ
-    secret_16: 16-байт ключ — используется для obfuscated2
+    secret_raw: полный секрет (ee + key + sni bytes)
+    secret_16: 16-байт ключ — используется для HMAC и obfuscated2 (как в tdesktop)
     """
     if len(secret_16) != 16:
         return False, f"bad_secret(len={len(secret_16)})"
@@ -270,7 +266,7 @@ async def check_faketls(host: str, port: int, secret_raw: bytes, secret_16: byte
 
     try:
         # --- Step 1: FakeTLS handshake ---
-        hello = build_client_hello(secret_raw, sni)
+        hello = build_client_hello(secret_16, sni)
         writer.write(hello)
         await writer.drain()
 

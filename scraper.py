@@ -308,13 +308,13 @@ async def check_faketls(host: str, port: int, secret_raw: bytes, secret_16: byte
         # --- Step 3: Obfuscated2 init ---
         init = _build_obfuscated2_init()
 
-        # Ключ шифрования/дешифрования — mtprotoproxy использует полный секрет
-        enc_key = hashlib.sha256(bytes(init[8:40]) + secret_raw).digest()
+        # Ключ шифрования/дешифрования — только 16-байт ключ (как в mtprotoproxy и official C)
+        enc_key = hashlib.sha256(bytes(init[8:40]) + secret_16).digest()
         enc_iv = bytes(init[40:56])
 
         # Ключ дешифрования (proxy → client): reversed prekey+iv
         rev = bytes(init[8:56])[::-1]
-        dec_key = hashlib.sha256(rev[:32] + secret_raw).digest()
+        dec_key = hashlib.sha256(rev[:32] + secret_16).digest()
         dec_iv = rev[32:]
 
         enc_cipher = Cipher(algorithms.AES(enc_key), modes.CTR(enc_iv)).encryptor()

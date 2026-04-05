@@ -136,8 +136,22 @@ def build_client_hello(secret_raw: bytes, sni_domain: str) -> bytes:
     msg += b"\x00\x0d\x00\x14\x00\x12\x04\x03\x08\x04\x04\x01\x05\x03\x08\x05\x05\x01\x08\x06"
     msg += b"\x06\x01\x02\x01\x00\x12\x00\x00\x00\x33\x00\x2b\x00\x29\xaa\xaa\x00\x01\x00\x00"
     msg += b"\x1d\x00\x20" + os.urandom(32)  # x25519 public key (random for check)
-    msg += b"\x00\x2d\x00\x02\x01\x01\x00\x2b\x00\x0b\x0a\xba\xba\x03\x04\x03\x03\x03\x02\x03"
-    msg += b"\x01\x00\x1b\x00\x03\x02\x00\x02\x3a\x3a\x00\x01\x00\x00\x15"
+    msg += b"\x00\x2d\x00\x02\x01\x01"  # psk_key_exchange_modes
+    # supported_versions: GREASE + TLS 1.3 + TLS 1.2 (убраны TLS 1.1/1.0 — новый Chrome/Telegram фингерпринт)
+    msg += b"\x00\x2b\x00\x07\x06\xba\xba\x03\x04\x03\x03"
+    msg += b"\x00\x1b\x00\x03\x02\x00\x02"  # compress_certificate
+    # ECH extension (0xfe0d) — обновлённый формат из Telegram PR #30513
+    ech_enc = os.urandom(32)       # public key (K)
+    ech_payload = os.urandom(128)  # encrypted client hello (E)
+    ech_body = (b"\x00"            # type: outer
+                b"\x00\x01"        # KDF: HKDF-SHA256
+                b"\x00\x01"        # AEAD: AES-128-GCM
+                + os.urandom(1)    # config_id
+                + b"\x00\x20" + ech_enc
+                + struct.pack("!H", len(ech_payload)) + ech_payload)
+    msg += b"\xfe\x0d" + struct.pack("!H", len(ech_body)) + ech_body
+    msg += b"\x3a\x3a\x00\x01\x00"  # GREASE extension
+    msg += b"\x00\x15"  # padding extension type
     # Padding extension до 517 байт
     msg += struct.pack("!H", TARGET_LEN - len(msg) - 2)
     msg += b"\x00" * (TARGET_LEN - len(msg))
